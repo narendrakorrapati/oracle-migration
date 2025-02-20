@@ -1,0 +1,15 @@
+spring:
+  datasource:
+    url: jdbc:oracle:thin:@localhost:1521/XEPDB1
+    username: DB_ADMIN
+    password: adminpassword
+  flyway:
+    schemas: CUSTOMER1
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+    baseline-version: 1.3.10
+    enabled: false
+
+logging:
+  level:
+    org.flywaydb: DEBUG

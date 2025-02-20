@@ -1,0 +1,1 @@
+insert into CUSTOMER_ORDERS values(5, 'Cable');
