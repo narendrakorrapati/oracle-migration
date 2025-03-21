@@ -88,3 +88,39 @@ END execute_query_to_columns_dbms_sql;
   select COL_VALUE from table(execute_query_to_columns('SELECT sysdate AS col1, 42 AS col2 FROM DUAL')) WHERE COL_NAME = 'COL1';
   select COL_VALUE from table(EXECUTE_QUERY_TO_COLUMNS_DBMS_SQL('SELECT sysdate AS col1, 42 AS col2 FROM DUAL')) WHERE COL_NAME = 'COL1';
 */
+
+create or replace PROCEDURE process_dynamic_query(p_query VARCHAR2) IS
+  -- Declare an associative array (hashmap) to store column values
+  TYPE col_map_type IS TABLE OF VARCHAR2(4000) INDEX BY VARCHAR2(100);
+  v_col_map col_map_type;
+
+  -- Call your existing function to get column-value pairs
+  l_result col_val_table;
+BEGIN
+  -- Get the result from the function
+  l_result := execute_query_to_columns_dbms_sql(p_query);
+
+  -- Populate the hashmap
+  FOR i IN 1..l_result.COUNT LOOP
+    v_col_map(l_result(i).col_name) := l_result(i).col_value;
+  END LOOP;
+
+  -- Example: Retrieve values from the hashmap
+  DBMS_OUTPUT.PUT_LINE('Today: ' || v_col_map('TODAY'));
+  DBMS_OUTPUT.PUT_LINE('Price: ' || v_col_map('PRICE'));
+
+  -- Add your custom logic here using v_col_map
+  -- Example: Convert to DATE/NUMBER
+  -- l_date DATE := TO_DATE(v_col_map('TODAY'), 'YYYY-MM-DD');
+  -- l_price NUMBER := TO_NUMBER(v_col_map('PRICE'));
+
+EXCEPTION
+  WHEN NO_DATA_FOUND THEN
+    RAISE_APPLICATION_ERROR(-20001, 'Query returned no rows');
+  WHEN TOO_MANY_ROWS THEN
+    RAISE_APPLICATION_ERROR(-20002, 'Query returned multiple rows');
+  WHEN OTHERS THEN
+    RAISE;
+END process_dynamic_query;
+/
+
