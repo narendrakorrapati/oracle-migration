@@ -89,38 +89,57 @@ END execute_query_to_columns_dbms_sql;
   select COL_VALUE from table(EXECUTE_QUERY_TO_COLUMNS_DBMS_SQL('SELECT sysdate AS col1, 42 AS col2 FROM DUAL')) WHERE COL_NAME = 'COL1';
 */
 
-create or replace PROCEDURE process_dynamic_query(p_query VARCHAR2) IS
-  -- Declare an associative array (hashmap) to store column values
-  TYPE col_map_type IS TABLE OF VARCHAR2(4000) INDEX BY VARCHAR2(100);
-  v_col_map col_map_type;
+CREATE OR REPLACE PROCEDURE process_dynamic_query(
+    p_select_query  IN VARCHAR2,  -- Query to populate the map
+    p_insert_query  IN VARCHAR2   -- INSERT statement with placeholders
+) IS
+    -- Hashmap to store column values
+    TYPE col_map_type IS TABLE OF VARCHAR2(4000) INDEX BY VARCHAR2(100);
+    v_col_map col_map_type;
 
-  -- Call your existing function to get column-value pairs
-  l_result col_val_table;
+    -- Variables for DBMS_SQL
+    l_cursor        INTEGER;
+    l_execute_res   NUMBER;
+    l_col_val_tab   col_val_table;
 BEGIN
-  -- Get the result from the function
-  l_result := execute_query_to_columns_dbms_sql(p_query);
+    -- Step 1: Populate v_col_map using your existing function
+    l_col_val_tab := execute_query_to_columns_dbms_sql(p_select_query);
+    FOR i IN 1..l_col_val_tab.COUNT LOOP
+        v_col_map(l_col_val_tab(i).col_name) := l_col_val_tab(i).col_value;
+    END LOOP;
 
-  -- Populate the hashmap
-  FOR i IN 1..l_result.COUNT LOOP
-    v_col_map(l_result(i).col_name) := l_result(i).col_value;
-  END LOOP;
+    -- Step 2: Process the INSERT statement
+    l_cursor := DBMS_SQL.OPEN_CURSOR;
+    
+    -- Parse the INSERT statement
+    DBMS_SQL.PARSE(l_cursor, p_insert_query, DBMS_SQL.NATIVE);
+    
+    -- Bind all placeholders dynamically
+    FOR r IN (
+        -- Extract placeholder names (e.g., "ID" from ":ID")
+        SELECT DISTINCT UPPER(REGEXP_SUBSTR(p_insert_query, ':(\w+)', 1, LEVEL, NULL, 1)) AS placeholder
+        FROM DUAL
+        CONNECT BY REGEXP_SUBSTR(p_insert_query, ':(\w+)', 1, LEVEL) IS NOT NULL
+    ) LOOP
+        IF v_col_map.EXISTS(r.placeholder) THEN
+            -- Bind value to placeholder (supports implicit type conversion)
+            DBMS_SQL.BIND_VARIABLE(l_cursor, r.placeholder, v_col_map(r.placeholder));
+        ELSE
+            RAISE_APPLICATION_ERROR(-20001, 'Placeholder "' || r.placeholder || '" not found in map');
+        END IF;
+    END LOOP;
 
-  -- Example: Retrieve values from the hashmap
-  DBMS_OUTPUT.PUT_LINE('Today: ' || v_col_map('TODAY'));
-  DBMS_OUTPUT.PUT_LINE('Price: ' || v_col_map('PRICE'));
+    -- Execute the INSERT
+    l_execute_res := DBMS_SQL.EXECUTE(l_cursor);
+    DBMS_SQL.CLOSE_CURSOR(l_cursor);
 
-  -- Add your custom logic here using v_col_map
-  -- Example: Convert to DATE/NUMBER
-  -- l_date DATE := TO_DATE(v_col_map('TODAY'), 'YYYY-MM-DD');
-  -- l_price NUMBER := TO_NUMBER(v_col_map('PRICE'));
-
+    DBMS_OUTPUT.PUT_LINE('Inserted ' || l_execute_res || ' row(s)');
 EXCEPTION
-  WHEN NO_DATA_FOUND THEN
-    RAISE_APPLICATION_ERROR(-20001, 'Query returned no rows');
-  WHEN TOO_MANY_ROWS THEN
-    RAISE_APPLICATION_ERROR(-20002, 'Query returned multiple rows');
-  WHEN OTHERS THEN
-    RAISE;
+    WHEN OTHERS THEN
+        IF DBMS_SQL.IS_OPEN(l_cursor) THEN
+            DBMS_SQL.CLOSE_CURSOR(l_cursor);
+        END IF;
+        RAISE;
 END process_dynamic_query;
 /
 
