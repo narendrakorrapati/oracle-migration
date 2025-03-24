@@ -143,3 +143,61 @@ EXCEPTION
 END process_dynamic_query;
 /
 
+--Get Place holder using DBMS_SQL instead of regex.
+CREATE OR REPLACE PROCEDURE process_dynamic_query(
+  p_select_query IN VARCHAR2,
+  p_insert_query IN VARCHAR2
+) IS
+  TYPE col_map_type IS TABLE OF VARCHAR2(4000) INDEX BY VARCHAR2(100);
+  v_col_map col_map_type;
+
+  l_cursor        INTEGER;
+  l_execute_res   NUMBER;
+  l_col_val_tab   col_val_table;
+  l_placeholder   VARCHAR2(100);
+  l_pos           NUMBER;
+BEGIN
+  -- Populate v_col_map
+  l_col_val_tab := execute_query_to_columns_dbms_sql(p_select_query);
+  FOR i IN 1..l_col_val_tab.COUNT LOOP
+    v_col_map(l_col_val_tab(i).col_name) := l_col_val_tab(i).col_value;
+  END LOOP;
+
+  -- Parse the SQL to identify valid placeholders
+  l_cursor := DBMS_SQL.OPEN_CURSOR;
+  DBMS_SQL.PARSE(l_cursor, p_insert_query, DBMS_SQL.NATIVE);
+
+  -- Loop through all valid bind variables in the SQL
+  l_pos := 1;
+  WHILE TRUE LOOP
+    BEGIN
+      -- Get the name of the placeholder at position l_pos
+      DBMS_SQL.VARIABLE_NAME(l_cursor, l_pos, l_placeholder);
+      l_placeholder := UPPER(TRIM(l_placeholder)); -- Case-insensitive
+
+      -- Check if the placeholder exists in v_col_map
+      IF v_col_map.EXISTS(l_placeholder) THEN
+        DBMS_SQL.BIND_VARIABLE(l_cursor, l_placeholder, v_col_map(l_placeholder));
+      ELSE
+        RAISE_APPLICATION_ERROR(-20001, 'Placeholder "' || l_placeholder || '" not found in map');
+      END IF;
+
+      l_pos := l_pos + 1;
+    EXCEPTION
+      WHEN OTHERS THEN
+        EXIT; -- Exit loop when no more placeholders
+    END;
+  END LOOP;
+
+  -- Execute and close
+  l_execute_res := DBMS_SQL.EXECUTE(l_cursor);
+  DBMS_SQL.CLOSE_CURSOR(l_cursor);
+
+EXCEPTION
+  WHEN OTHERS THEN
+    IF DBMS_SQL.IS_OPEN(l_cursor) THEN
+      DBMS_SQL.CLOSE_CURSOR(l_cursor);
+    END IF;
+    RAISE;
+END process_dynamic_query;
+/
